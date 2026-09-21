@@ -1227,54 +1227,12 @@ def mark_distributed(
 
     # Re-check everything immediately before changing stock.
     # This prevents a village from being distributed using stale readiness data.
-    for requirement in requirements:
-        status_row = db.query(CommodityStatus).filter(
-            CommodityStatus.shop_id == village.shop_id,
-            CommodityStatus.commodity_id == requirement.commodity_id,
-        ).first()
-        status_value = status_row.status if status_row else "active"
+   
 
-        if _is_blocking_commodity_status(status_value):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=(
-                    f"Cannot distribute: commodity '{requirement.commodity.name}' "
-                    f"is {status_value}"
-                ),
-            )
+   #new line has to be enter here
 
-        stock_entry = db.query(Stock).filter(
-            Stock.shop_id == village.shop_id,
-            Stock.commodity_id == requirement.commodity_id,
-        ).first()
 
-        if not stock_entry or stock_entry.quantity < requirement.quantity:
-            available = stock_entry.quantity if stock_entry else 0
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=(
-                    f"Insufficient stock for '{requirement.commodity.name}': "
-                    f"required {requirement.quantity}, available {available}"
-                ),
-            )
-
-    # All checks passed, so deduct every required commodity in one transaction.
-    distributed_items = []
-    for requirement in requirements:
-        stock_entry = db.query(Stock).filter(
-            Stock.shop_id == village.shop_id,
-            Stock.commodity_id == requirement.commodity_id,
-        ).first()
-
-        stock_entry.quantity -= requirement.quantity
-        remaining = stock_entry.quantity
-        distributed_items.append({
-            "commodity_id": requirement.commodity_id,
-            "commodity_name": requirement.commodity.name,
-            "distributed_quantity": requirement.quantity,
-            "remaining_stock": remaining,
-        })
-
+   
         # Keep an auditable historical record for demand forecasting.
         db.add(DistributionHistory(
             shop_id=village.shop_id,
