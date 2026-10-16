@@ -819,3 +819,138 @@ textarea:focus {
 .mt-4 { margin-top: 1.25rem; }
 .mb-3 { margin-bottom: 0.75rem; }
 .p-4 { padding: 1.25rem; }
+
+/* ================= Biometric Scanner Styles ================= */
+.auth-badge-bio {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--primary-dark);
+  background: var(--primary-light);
+  padding: 0.25rem 0.65rem;
+  border-radius: 9999px;
+  margin-bottom: 0.75rem;
+}
+
+.biometric-terminal {
+  background: #f8fafc;
+  border: 2px dashed #cbd5e1;
+  border-radius: var(--radius-lg);
+  padding: 1.5rem 1rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  user-select: none;
+  margin: 1.25rem 0;
+}
+
+.biometric-terminal:hover {
+  border-color: var(--primary);
+  background: #f0fdf4;
+}
+
+.scanner-pad {
+  width: 90px;
+  height: 90px;
+  border-radius: 50%;
+  background: #0f172a;
+  border: 3px solid #10b981;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  overflow: hidden;
+  box-shadow: 0 0 15px rgba(16, 185, 129, 0.25);
+  transition: all 0.25s ease;
+}
+
+.fingerprint-icon {
+  width: 48px;
+  height: 48px;
+  color: #34d399;
+  transition: all 0.2s ease;
+}
+
+.scanner-laser {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: #10b981;
+  box-shadow: 0 0 10px #10b981, 0 0 5px #34d399;
+  opacity: 0;
+}
+
+.scanner-pad.scanning {
+  border-color: #38bdf8;
+  box-shadow: 0 0 20px rgba(56, 189, 248, 0.5);
+}
+
+.scanner-pad.scanning .fingerprint-icon {
+  color: #38bdf8;
+}
+
+.scanner-pad.scanning .scanner-laser {
+  opacity: 1;
+  animation: laserSweep 1.2s infinite ease-in-out;
+}
+
+@keyframes laserSweep {
+  0% { top: 0%; opacity: 0.8; }
+  50% { top: 96%; opacity: 1; }
+  100% { top: 0%; opacity: 0.8; }
+}
+
+.scanner-pad.matched {
+  border-color: #10b981;
+  background: #064e3b;
+  box-shadow: 0 0 25px rgba(16, 185, 129, 0.8);
+}
+
+.scanner-pad.failed {
+  border-color: #ef4444;
+  background: #450a0a;
+  box-shadow: 0 0 25px rgba(239, 68, 68, 0.8);
+}
+
+.scanner-pad.failed .fingerprint-icon {
+  color: #f87171;
+}
+
+.scanner-info {
+  margin-top: 1rem;
+  text-align: center;
+}
+
+.scanner-status-text {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--secondary);
+}
+
+.scanner-subtext {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-top: 0.2rem;
+}
+
+.btn-bio-quick {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0.5rem;
+  padding: 0.5rem 0.85rem;
+  text-align: left;
+}
+
+.bio-touch-icon {
+  font-size: 1.1rem;
+}
+

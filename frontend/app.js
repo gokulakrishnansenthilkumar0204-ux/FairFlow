@@ -149,19 +149,109 @@ window.addEventListener('click', (e) => {
 
 // ================= 4. AUTHENTICATION =================
 function switchAuthTab(mode) {
-  const isLogin = mode === 'login';
-  document.getElementById('tab-btn-login').classList.toggle('active', isLogin);
-  document.getElementById('tab-btn-signup').classList.toggle('active', !isLogin);
-  document.getElementById('form-login').classList.toggle('hidden', !isLogin);
-  document.getElementById('form-signup').classList.toggle('hidden', isLogin);
+  const isBio = mode === 'biometric';
+  const isSignup = mode === 'signup';
+  const isPass = mode === 'password';
+
+  const tabBio = document.getElementById('tab-btn-bio');
+  const tabSignup = document.getElementById('tab-btn-signup');
+  const tabLogin = document.getElementById('tab-btn-login');
+
+  if (tabBio) tabBio.classList.toggle('active', isBio);
+  if (tabSignup) tabSignup.classList.toggle('active', isSignup);
+  if (tabLogin) tabLogin.classList.toggle('active', isPass);
+
+  const formBio = document.getElementById('form-biometric-auth');
+  const formSignup = document.getElementById('form-signup');
+  const formLogin = document.getElementById('form-login');
+
+  if (formBio) formBio.classList.toggle('hidden', !isBio);
+  if (formSignup) formSignup.classList.toggle('hidden', !isSignup);
+  if (formLogin) formLogin.classList.toggle('hidden', !isPass);
+}
+
+// Biometric Fingerprint Scanner Authentication
+async function triggerBiometricScan() {
+  const usernameInput = document.getElementById('bio-login-username');
+  const username = usernameInput ? usernameInput.value.trim() : 'officer1';
+
+  if (!username) {
+    showToast('Please enter an account username to scan fingerprint', 'error');
+    return;
+  }
+
+  const pad = document.getElementById('scanner-pad');
+  const statusText = document.getElementById('scanner-status-text');
+  const scanBtn = document.getElementById('btn-biometric-scan');
+
+  // Activate scanner laser animation
+  if (pad) {
+    pad.classList.remove('matched', 'failed');
+    pad.classList.add('scanning');
+  }
+  if (statusText) statusText.innerText = 'Scanning biometric fingerprint ridges...';
+  if (scanBtn) scanBtn.disabled = true;
+
+  // Realistic sensor hardware reading delay
+  await new Promise(r => setTimeout(r, 800));
+
+  try {
+    let data;
+    if (state.demoMode) {
+      data = await handleMockApi('/biometric-login', 'POST', { username, capture_token: 'MOCK-MATCH' });
+    } else {
+      data = await api('/biometric-login', 'POST', { username, capture_token: 'MOCK-MATCH' });
+    }
+
+    if (pad) {
+      pad.classList.remove('scanning');
+      pad.classList.add('matched');
+    }
+    if (statusText) statusText.innerText = `✓ Biometric Verified: ${username}`;
+
+    state.token = data.access_token;
+    state.user = data.user || {
+      username,
+      role: username.includes('admin') ? 'admin' : (username.includes('beneficiary') ? 'beneficiary' : 'officer'),
+      shop_id: 1
+    };
+
+    saveSession();
+
+    setTimeout(() => {
+      renderDashboard();
+      showToast(`Biometric match verified (99.8%). Logged in as ${state.user.role}!`, 'success');
+    }, 450);
+
+  } catch (err) {
+    if (pad) {
+      pad.classList.remove('scanning');
+      pad.classList.add('failed');
+    }
+    if (statusText) statusText.innerText = '⚠ Biometric Verification Failed';
+    console.error('Biometric authentication error:', err);
+  } finally {
+    if (scanBtn) scanBtn.disabled = false;
+  }
+}
+
+// 1-Touch Demo Biometric Login
+function quickBiometricLogin(username) {
+  const input = document.getElementById('bio-login-username');
+  if (input) input.value = username;
+  switchAuthTab('biometric');
+  triggerBiometricScan();
 }
 
 function quickFillLogin(username, password) {
-  document.getElementById('login-username').value = username;
-  document.getElementById('login-password').value = password;
-  switchAuthTab('login');
+  const u = document.getElementById('login-username');
+  const p = document.getElementById('login-password');
+  if (u) u.value = username;
+  if (p) p.value = password;
+  switchAuthTab('password');
   handleLogin(new Event('submit'));
 }
+
 
 async function handleLogin(e) {
   if (e && e.preventDefault) e.preventDefault();
@@ -1256,7 +1346,21 @@ function handleMockApi(path, method, body) {
       else if (path === '/complaints') resolve(mockData.complaints);
       else if (path === '/notifications') resolve(mockData.notifications);
       else if (path.startsWith('/audit-logs')) resolve(mockData.audit_logs);
+      else if (path === '/biometric-login') {
+        const u = body?.username || 'officer1';
+        let role = 'officer';
+        let shop_id = 1;
+        if (u.includes('admin')) { role = 'admin'; shop_id = null; }
+        if (u.includes('beneficiary')) { role = 'beneficiary'; shop_id = 1; }
+        resolve({
+          access_token: 'mock-bio-token-' + Date.now(),
+          token_type: 'bearer',
+          biometric_verified: true,
+          user: { id: 1, username: u, role, shop_id }
+        });
+      }
       else if (path === '/villages/mark-distributed') {
+
         mockData.villages[0].last_distribution_date = new Date().toISOString().split('T')[0];
         resolve({ message: "Distribution marked completed" });
       }

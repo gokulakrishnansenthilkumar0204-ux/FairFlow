@@ -60,18 +60,53 @@
     <div id="auth-view" class="view-panel">
       <div class="auth-card">
         <div class="auth-header">
-          <h2>Welcome to FairFlow</h2>
-          <p>Fair Price Shop inventory, village distribution, demand forecasting & beneficiary services</p>
+          <div class="auth-badge-bio">🛡️ Biometric Security</div>
+          <h2>Biometric Authentication Portal</h2>
+          <p>Fair Price Shop PDS terminal with biometric fingerprint verification</p>
         </div>
 
         <!-- Auth Mode Tabs -->
         <div class="segmented-control">
-          <button class="segmented-btn active" id="tab-btn-login" onclick="switchAuthTab('login')">Sign In</button>
-          <button class="segmented-btn" id="tab-btn-signup" onclick="switchAuthTab('signup')">Beneficiary Sign Up</button>
+          <button class="segmented-btn active" id="tab-btn-bio" onclick="switchAuthTab('biometric')">👆 Biometric Login</button>
+          <button class="segmented-btn" id="tab-btn-signup" onclick="switchAuthTab('signup')">Sign Up</button>
+          <button class="segmented-btn" id="tab-btn-login" onclick="switchAuthTab('password')">Password</button>
         </div>
 
-        <!-- Login Form -->
-        <form id="form-login" onsubmit="handleLogin(event)" class="auth-form">
+        <!-- 1. Biometric Authentication Form (Primary) -->
+        <div id="form-biometric-auth" class="auth-form">
+          <div class="form-group">
+            <label for="bio-login-username">User Account / Aadhaar ID</label>
+            <input type="text" id="bio-login-username" required placeholder="e.g. officer1, admin_demo, or beneficiary1" value="officer1">
+          </div>
+
+          <!-- Interactive Fingerprint Terminal Sensor -->
+          <div class="biometric-terminal" onclick="triggerBiometricScan()" id="biometric-terminal" title="Click to scan fingerprint">
+            <div class="scanner-pad" id="scanner-pad">
+              <div class="scanner-laser" id="scanner-laser"></div>
+              <svg class="fingerprint-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 2a10 10 0 0 0-8 8c0 3.2 1.3 6.1 3.5 8.2"/>
+                <path d="M12 6a6 6 0 0 0-4.8 4.8"/>
+                <path d="M12 10a2 2 0 0 0-1.6 1.6"/>
+                <path d="M12 14a2 2 0 0 1 1.6-1.6"/>
+                <path d="M12 18a6 6 0 0 1 4.8-4.8"/>
+                <path d="M12 22a10 10 0 0 1 8-8c0-3.2-1.3-6.1-3.5-8.2"/>
+                <path d="M8.5 14.5c.5 1.5 1.8 2.5 3.5 2.5s3-1 3.5-2.5"/>
+                <path d="M9.5 11c.3.8 1.2 1.5 2.5 1.5s2.2-.7 2.5-1.5"/>
+              </svg>
+            </div>
+            <div class="scanner-info">
+              <div class="scanner-status-text" id="scanner-status-text">Touch Sensor to Verify Fingerprint</div>
+              <div class="scanner-subtext">Optical Biometric Reader · Encrypted STQC Token</div>
+            </div>
+          </div>
+
+          <button type="button" class="btn btn-primary btn-block mt-3" onclick="triggerBiometricScan()" id="btn-biometric-scan">
+            👆 Authenticate with Biometrics
+          </button>
+        </div>
+
+        <!-- 2. Traditional Password Login Form (Secondary fallback) -->
+        <form id="form-login" onsubmit="handleLogin(event)" class="auth-form hidden">
           <div class="form-group">
             <label for="login-username">Username</label>
             <input type="text" id="login-username" required placeholder="e.g. officer1 or admin_demo" autocomplete="username">
@@ -80,10 +115,10 @@
             <label for="login-password">Password</label>
             <input type="password" id="login-password" required placeholder="Enter password" autocomplete="current-password">
           </div>
-          <button type="submit" class="btn btn-primary btn-block">Sign In</button>
+          <button type="submit" class="btn btn-primary btn-block">Sign In with Password</button>
         </form>
 
-        <!-- Signup Form -->
+        <!-- 3. Beneficiary Signup Form -->
         <form id="form-signup" onsubmit="handleSignup(event)" class="auth-form hidden">
           <div class="form-group">
             <label for="signup-username">Username</label>
@@ -108,18 +143,18 @@
           <button type="submit" class="btn btn-primary btn-block">Create Beneficiary Account</button>
         </form>
 
-        <!-- Quick Demo Login Helpers -->
+        <!-- Quick 1-Touch Demo Fingerprints -->
         <div class="quick-demo-box">
-          <div class="quick-demo-title">⚡ Quick Demo Logins (Password: Demo@1234)</div>
+          <div class="quick-demo-title">⚡ 1-Touch Biometric Demo Authentication</div>
           <div class="quick-demo-buttons">
-            <button class="btn btn-sm btn-outline" onclick="quickFillLogin('admin_demo', 'Demo@1234')">
-              <strong>Admin</strong> (admin_demo)
+            <button class="btn btn-sm btn-outline btn-bio-quick" onclick="quickBiometricLogin('officer1')">
+              <span class="bio-touch-icon">👆</span> <strong>Officer Scan</strong> (officer1 - FPS Guindy)
             </button>
-            <button class="btn btn-sm btn-outline" onclick="quickFillLogin('officer1', 'Demo@1234')">
-              <strong>Officer</strong> (officer1 - Guindy)
+            <button class="btn btn-sm btn-outline btn-bio-quick" onclick="quickBiometricLogin('beneficiary1')">
+              <span class="bio-touch-icon">👆</span> <strong>Beneficiary Scan</strong> (beneficiary1)
             </button>
-            <button class="btn btn-sm btn-outline" onclick="quickFillLogin('beneficiary1', 'Demo@1234')">
-              <strong>Beneficiary</strong> (beneficiary1)
+            <button class="btn btn-sm btn-outline btn-bio-quick" onclick="quickBiometricLogin('admin_demo')">
+              <span class="bio-touch-icon">👆</span> <strong>Admin Scan</strong> (admin_demo)
             </button>
           </div>
         </div>

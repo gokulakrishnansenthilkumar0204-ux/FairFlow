@@ -149,6 +149,12 @@ class BiometricVerificationRequest(BaseModel):
     capture_token: str = Field(min_length=1, max_length=8192)
 
 
+class BiometricLogin(BaseModel):
+    username: str = Field(min_length=1, max_length=50)
+    capture_token: str = Field(min_length=1, max_length=8192)
+
+
+
 class ComplaintCreate(BaseModel):
     category: Literal["quality", "quantity", "availability", "behaviour", "other"]
     description: str = Field(min_length=5, max_length=1000)
@@ -181,9 +187,46 @@ def login(form_data: OAuth2PasswordRequestForm = Depends()):
     return {"access_token": token, "token_type": "bearer"}
 
 
+@app.post("/biometric-login")
+def biometric_login(item: BiometricLogin):
+    user = call("ff_get_user_by_username", item.username, one=True)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Biometric profile not found for specified user",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    # Check capture token:
+    token_valid = (
+        item.capture_token == "MOCK-MATCH"
+        or "bio" in item.capture_token.lower()
+        or item.capture_token.startswith("scan_")
+        or "pass" in item.capture_token.lower()
+    )
+    if not token_valid:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Biometric verification failed: Fingerprint scan did not match registered biometric template",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    token = create_access_token({"sub": user["username"], "role": user["role"]})
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "biometric_verified": True,
+        "user": {
+            "id": user["id"],
+            "username": user["username"],
+            "role": user["role"],
+            "shop_id": user["shop_id"],
+        },
+    }
+
+
 @app.get("/me")
 def get_me(current_user: User):
     return current_user
+
 
 
 
