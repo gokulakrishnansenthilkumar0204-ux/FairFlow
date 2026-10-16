@@ -30,9 +30,11 @@ async def lifespan(_app: FastAPI):
 app = FastAPI(title="FairFlow API", lifespan=lifespan)
 
 _origins = [o.strip() for o in os.getenv("CORS_ORIGINS", "").split(",") if o.strip()]
-if _origins:  # only needed for Flutter web / browser clients
-    app.add_middleware(CORSMiddleware, allow_origins=_origins, allow_methods=["*"],
-                       allow_headers=["*"])
+if not _origins:
+    _origins = ["*"]
+app.add_middleware(CORSMiddleware, allow_origins=_origins, allow_credentials=True,
+                   allow_methods=["*"], allow_headers=["*"])
+
 
 User = Annotated[dict, Depends(get_current_user)]
 
@@ -177,6 +179,12 @@ def login(form_data: OAuth2PasswordRequestForm = Depends()):
         )
     token = create_access_token({"sub": user["username"], "role": user["role"]})
     return {"access_token": token, "token_type": "bearer"}
+
+
+@app.get("/me")
+def get_me(current_user: User):
+    return current_user
+
 
 
 @app.post("/admin/users", status_code=status.HTTP_201_CREATED)
@@ -572,3 +580,13 @@ def list_notifications(current_user: User):
 def list_audit_logs(current_user: User, limit: int = Query(100, ge=1, le=1000)):
     require_role(current_user, "admin", detail="Only admin can view audit logs")
     return call("ff_list_audit_log", limit)
+
+
+# ---------- Frontend UI ----------
+
+_frontend_dir = os.path.join(os.path.dirname(__file__), "frontend")
+if os.path.exists(_frontend_dir):
+    from fastapi.staticfiles import StaticFiles
+
+    app.mount("/", StaticFiles(directory=_frontend_dir, html=True), name="frontend")
+

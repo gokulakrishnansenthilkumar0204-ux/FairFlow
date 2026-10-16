@@ -63,9 +63,12 @@ python setup_db.py
 # 4. Optional: demo data (2 shops, 5 villages, users, stock, 6 months of history)
 python seed_demo.py        # safe to re-run; prints the demo logins (password Demo@1234)
 
-# 5. Start the API  (interactive docs at http://localhost:8000/docs)
+# 5. Start the API and Frontend (web app at http://localhost:8000, docs at http://localhost:8000/docs)
 uvicorn main:app --reload
 ```
+
+Visiting `http://localhost:8000/` will load the FairFlow Web Frontend automatically. You can also open `frontend/index.html` directly in your browser.
+
 
 `setup_db.py` runs everything in one transaction. If any step fails (for example an
 old `distribution_history` row has an invalid date such as `2026-13-45`), it stops with

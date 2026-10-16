@@ -1,0 +1,859 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FairFlow - PDS Ration Shop Management</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+
+  <!-- Toast Notification Container -->
+  <div id="toast-container" class="toast-container"></div>
+
+  <!-- Top Navigation Bar -->
+  <header class="app-header">
+    <div class="header-content">
+      <div class="brand">
+        <span class="brand-icon">🌾</span>
+        <div>
+          <h1 class="brand-title">FairFlow</h1>
+          <p class="brand-subtitle">Public Distribution System</p>
+        </div>
+      </div>
+
+      <!-- Mode & Server Indicator -->
+      <div class="header-actions">
+        <div class="status-pill" id="backend-status-pill" title="Click to test connection">
+          <span class="status-dot online" id="status-dot"></span>
+          <span id="status-text">Connecting...</span>
+        </div>
+
+        <button class="btn btn-outline-sm" id="btn-toggle-demo" title="Toggle Mock Demo Mode for offline presentation">
+          Demo Mode: <strong id="demo-mode-state">OFF</strong>
+        </button>
+
+        <!-- User Profile Pill (Visible when logged in) -->
+        <div id="user-profile-pill" class="user-pill hidden">
+          <span class="role-badge" id="header-user-role">Role</span>
+          <span class="user-name" id="header-username">User</span>
+          <button class="btn btn-sm btn-danger-ghost" id="btn-logout" title="Log Out">Logout</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Navigation Tabs (Dynamic based on role) -->
+    <nav id="app-nav" class="app-nav hidden">
+      <div class="nav-tabs" id="nav-tabs-container">
+        <!-- Injected via JavaScript based on role -->
+      </div>
+    </nav>
+  </header>
+
+  <!-- Main Container -->
+  <main class="main-container">
+
+    <!-- 1. AUTH SCREEN (Logged out) -->
+    <div id="auth-view" class="view-panel">
+      <div class="auth-card">
+        <div class="auth-header">
+          <h2>Welcome to FairFlow</h2>
+          <p>Fair Price Shop inventory, village distribution, demand forecasting & beneficiary services</p>
+        </div>
+
+        <!-- Auth Mode Tabs -->
+        <div class="segmented-control">
+          <button class="segmented-btn active" id="tab-btn-login" onclick="switchAuthTab('login')">Sign In</button>
+          <button class="segmented-btn" id="tab-btn-signup" onclick="switchAuthTab('signup')">Beneficiary Sign Up</button>
+        </div>
+
+        <!-- Login Form -->
+        <form id="form-login" onsubmit="handleLogin(event)" class="auth-form">
+          <div class="form-group">
+            <label for="login-username">Username</label>
+            <input type="text" id="login-username" required placeholder="e.g. officer1 or admin_demo" autocomplete="username">
+          </div>
+          <div class="form-group">
+            <label for="login-password">Password</label>
+            <input type="password" id="login-password" required placeholder="Enter password" autocomplete="current-password">
+          </div>
+          <button type="submit" class="btn btn-primary btn-block">Sign In</button>
+        </form>
+
+        <!-- Signup Form -->
+        <form id="form-signup" onsubmit="handleSignup(event)" class="auth-form hidden">
+          <div class="form-group">
+            <label for="signup-username">Username</label>
+            <input type="text" id="signup-username" required placeholder="Choose a username (min 3 chars)">
+          </div>
+          <div class="form-group">
+            <label for="signup-password">Password</label>
+            <input type="password" id="signup-password" required placeholder="Min 8 characters">
+          </div>
+          <div class="form-group">
+            <label for="signup-shop">Assigned Fair Price Shop</label>
+            <select id="signup-shop" required>
+              <option value="">Select your shop...</option>
+              <option value="1">FPS Guindy (Chennai)</option>
+              <option value="2">FPS Tambaram (Chengalpattu)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="signup-phone">Mobile Phone (for SMS notifications)</label>
+            <input type="tel" id="signup-phone" placeholder="+919876543210">
+          </div>
+          <button type="submit" class="btn btn-primary btn-block">Create Beneficiary Account</button>
+        </form>
+
+        <!-- Quick Demo Login Helpers -->
+        <div class="quick-demo-box">
+          <div class="quick-demo-title">⚡ Quick Demo Logins (Password: Demo@1234)</div>
+          <div class="quick-demo-buttons">
+            <button class="btn btn-sm btn-outline" onclick="quickFillLogin('admin_demo', 'Demo@1234')">
+              <strong>Admin</strong> (admin_demo)
+            </button>
+            <button class="btn btn-sm btn-outline" onclick="quickFillLogin('officer1', 'Demo@1234')">
+              <strong>Officer</strong> (officer1 - Guindy)
+            </button>
+            <button class="btn btn-sm btn-outline" onclick="quickFillLogin('beneficiary1', 'Demo@1234')">
+              <strong>Beneficiary</strong> (beneficiary1)
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 2. AUTHENTICATED APP VIEWS -->
+    <div id="app-view" class="view-panel hidden">
+
+      <!-- ================= ADMIN SCREENS ================= -->
+      <div id="admin-panel" class="role-panel hidden">
+        <!-- Admin Overview / Stats -->
+        <section id="admin-tab-overview" class="tab-pane active">
+          <div class="section-header">
+            <h2>System Administration</h2>
+            <p>Control center for Fair Price Shops, villages, commodities, and audit trails</p>
+          </div>
+          <div class="stats-grid">
+            <div class="stat-card">
+              <span class="stat-icon">🏪</span>
+              <div>
+                <div class="stat-value" id="admin-stat-shops">0</div>
+                <div class="stat-label">Active Fair Price Shops</div>
+              </div>
+            </div>
+            <div class="stat-card">
+              <span class="stat-icon">🏡</span>
+              <div>
+                <div class="stat-value" id="admin-stat-villages">0</div>
+                <div class="stat-label">Covered Villages</div>
+              </div>
+            </div>
+            <div class="stat-card">
+              <span class="stat-icon">📦</span>
+              <div>
+                <div class="stat-value" id="admin-stat-commodities">0</div>
+                <div class="stat-label">Managed Commodities</div>
+              </div>
+            </div>
+            <div class="stat-card">
+              <span class="stat-icon">🛡️</span>
+              <div>
+                <div class="stat-value" id="admin-stat-audits">0</div>
+                <div class="stat-label">Audit Log Records</div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Admin Shops -->
+        <section id="admin-tab-shops" class="tab-pane">
+          <div class="section-header-flex">
+            <div>
+              <h2>Fair Price Shops</h2>
+              <p>Manage ration shop outlets and geographic coverage</p>
+            </div>
+            <button class="btn btn-primary" onclick="showModal('modal-add-shop')">+ Add New Shop</button>
+          </div>
+          <div class="card table-card">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Shop ID</th>
+                  <th>Shop Name</th>
+                  <th>Location</th>
+                </tr>
+              </thead>
+              <tbody id="admin-shops-tbody">
+                <tr><td colspan="3" class="text-center">Loading shops...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- Admin Villages -->
+        <section id="admin-tab-villages" class="tab-pane">
+          <div class="section-header-flex">
+            <div>
+              <h2>Villages & Hamlets</h2>
+              <p>Villages mapped to their designated distribution shop</p>
+            </div>
+            <button class="btn btn-primary" onclick="showModal('modal-add-village')">+ Add Village</button>
+          </div>
+          <div class="card table-card">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Village ID</th>
+                  <th>Village Name</th>
+                  <th>Assigned Shop</th>
+                  <th>Last Distribution Date</th>
+                </tr>
+              </thead>
+              <tbody id="admin-villages-tbody">
+                <tr><td colspan="4" class="text-center">Loading villages...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- Admin Commodities -->
+        <section id="admin-tab-commodities" class="tab-pane">
+          <div class="section-header-flex">
+            <div>
+              <h2>Commodities Master</h2>
+              <p>Items distributed through the PDS network</p>
+            </div>
+            <button class="btn btn-primary" onclick="showModal('modal-add-commodity')">+ Add Commodity</button>
+          </div>
+          <div class="card table-card">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Commodity ID</th>
+                  <th>Commodity Name</th>
+                </tr>
+              </thead>
+              <tbody id="admin-commodities-tbody">
+                <tr><td colspan="2" class="text-center">Loading commodities...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- Admin Users / Officers -->
+        <section id="admin-tab-users" class="tab-pane">
+          <div class="section-header-flex">
+            <div>
+              <h2>Staff & Officers Management</h2>
+              <p>Create official accounts for FPS Officers and System Admins</p>
+            </div>
+            <button class="btn btn-primary" onclick="showModal('modal-add-user')">+ Add Officer / Admin</button>
+          </div>
+          <div class="card">
+            <p class="card-desc">Officers have authority over their assigned Fair Price Shop. They manage stock, execute village distribution runs, check biometric verifications, and resolve local beneficiary complaints.</p>
+          </div>
+        </section>
+
+        <!-- Admin Audit Logs -->
+        <section id="admin-tab-audit" class="tab-pane">
+          <div class="section-header-flex">
+            <div>
+              <h2>System Audit Log</h2>
+              <p>Cryptographically backed, immutable record of all system events and transactions</p>
+            </div>
+            <button class="btn btn-outline-sm" onclick="loadAdminAuditLogs()">↻ Refresh</button>
+          </div>
+          <div class="card table-card">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Timestamp</th>
+                  <th>Action</th>
+                  <th>Shop</th>
+                  <th>Actor ID</th>
+                  <th>Details</th>
+                </tr>
+              </thead>
+              <tbody id="admin-audit-tbody">
+                <tr><td colspan="6" class="text-center">Loading audit log...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+
+      <!-- ================= OFFICER SCREENS ================= -->
+      <div id="officer-panel" class="role-panel hidden">
+
+        <!-- Officer Stock & Inventory -->
+        <section id="officer-tab-stock" class="tab-pane active">
+          <!-- Next Village Banner -->
+          <div class="banner banner-info" id="next-village-banner">
+            <div class="banner-icon">🚚</div>
+            <div class="banner-content">
+              <strong>Next Scheduled Distribution:</strong>
+              <span id="next-village-name">Checking schedule...</span>
+            </div>
+          </div>
+
+          <div class="section-header-flex">
+            <div>
+              <h2>Shop Stock & Inventory</h2>
+              <p>Monitor physical inventory levels and item statuses</p>
+            </div>
+            <div class="button-group">
+              <button class="btn btn-outline" onclick="showModal('modal-commodity-status')">Update Item Status</button>
+              <button class="btn btn-primary" onclick="showModal('modal-add-stock')">+ Receive New Stock</button>
+            </div>
+          </div>
+
+          <div class="card table-card">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Stock ID</th>
+                  <th>Commodity</th>
+                  <th>Quantity In Hand</th>
+                  <th>Status</th>
+                  <th>Reason / Notes</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="officer-stock-tbody">
+                <tr><td colspan="6" class="text-center">Loading stock...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- Officer Village Distribution & Readiness -->
+        <section id="officer-tab-villages" class="tab-pane">
+          <div class="section-header-flex">
+            <div>
+              <h2>Village Distribution Runs</h2>
+              <p>Check stock readiness for each village and record completed distributions</p>
+            </div>
+          </div>
+
+          <div class="card table-card">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Village</th>
+                  <th>Last Distributed</th>
+                  <th>Distribution Readiness</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="officer-villages-tbody">
+                <tr><td colspan="4" class="text-center">Loading villages...</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Selected Village Readiness Inspection Card -->
+          <div id="readiness-detail-card" class="card mt-4 hidden">
+            <div class="section-header-flex">
+              <h3 id="readiness-village-title">Village Readiness Details</h3>
+              <button class="btn btn-sm btn-outline" onclick="closeReadinessDetail()">Close</button>
+            </div>
+            <div id="readiness-summary-pill" class="badge badge-lg mb-3">Checking...</div>
+            <div id="readiness-items-breakdown"></div>
+            <div class="action-footer mt-4">
+              <button id="btn-mark-distributed" class="btn btn-success" onclick="executeDistribution()">
+                ✓ Mark Distribution Complete (Atomic Stock Deduction)
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <!-- Officer ML Demand Forecasting -->
+        <section id="officer-tab-forecast" class="tab-pane">
+          <div class="section-header-flex">
+            <div>
+              <h2>AI / ML Demand Forecasting</h2>
+              <p>Univariate Linear Regression trained on distribution history to guide intelligent stock procurement</p>
+            </div>
+            <button class="btn btn-outline-sm" onclick="showModal('modal-add-history')">+ Add Historical Record</button>
+          </div>
+
+          <div id="forecast-grid" class="forecast-grid">
+            <div class="card text-center p-4">Loading predictive demand models...</div>
+          </div>
+        </section>
+
+        <!-- Officer Biometric Verification Counter -->
+        <section id="officer-tab-biometric" class="tab-pane">
+          <div class="section-header">
+            <h2>Biometric Identity Verification</h2>
+            <p>Counter-level authentication for ration beneficiaries before issuance</p>
+          </div>
+
+          <div class="grid-2col">
+            <div class="card">
+              <h3>Verify Beneficiary</h3>
+              <form id="form-biometric" onsubmit="handleBiometricVerify(event)" class="mt-3">
+                <div class="form-group">
+                  <label for="bio-beneficiary-id">Beneficiary ID</label>
+                  <input type="number" id="bio-beneficiary-id" required placeholder="e.g. 1" min="1">
+                </div>
+                <div class="form-group">
+                  <label for="bio-token">Scanner Capture Token</label>
+                  <input type="text" id="bio-token" required placeholder="Biometric capture signature or token">
+                  <small class="form-hint">
+                    <a href="javascript:void(0)" onclick="fillMockBiometricToken('valid')">Insert Valid Demo Token</a> |
+                    <a href="javascript:void(0)" onclick="fillMockBiometricToken('invalid')">Insert Invalid Token</a>
+                  </small>
+                </div>
+                <button type="submit" class="btn btn-primary btn-block">Verify Identity</button>
+              </form>
+            </div>
+
+            <div class="card" id="bio-result-card">
+              <h3>Verification Outcome</h3>
+              <div id="bio-result-content" class="text-center p-4 text-muted">
+                Scan or verify a beneficiary to view verification result here.
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Officer Complaints Management -->
+        <section id="officer-tab-complaints" class="tab-pane">
+          <div class="section-header-flex">
+            <div>
+              <h2>Beneficiary Complaints</h2>
+              <p>Address grievances filed by cardholders regarding stock, quality, or services</p>
+            </div>
+            <button class="btn btn-outline-sm" onclick="loadOfficerComplaints()">↻ Refresh</button>
+          </div>
+
+          <div class="card table-card">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Beneficiary</th>
+                  <th>Category</th>
+                  <th>Description</th>
+                  <th>Status</th>
+                  <th>Resolution Note</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="officer-complaints-tbody">
+                <tr><td colspan="7" class="text-center">Loading complaints...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+
+      <!-- ================= BENEFICIARY SCREENS ================= -->
+      <div id="beneficiary-panel" class="role-panel hidden">
+
+        <!-- Beneficiary Shop Stock -->
+        <section id="beneficiary-tab-stock" class="tab-pane active">
+          <div class="section-header">
+            <h2>Fair Price Shop Ration Stock</h2>
+            <p>Live inventory transparency for your ration entitlement</p>
+          </div>
+
+          <div class="card table-card">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Commodity</th>
+                  <th>Quantity in Stock</th>
+                  <th>Status</th>
+                  <th>Remarks</th>
+                </tr>
+              </thead>
+              <tbody id="beneficiary-stock-tbody">
+                <tr><td colspan="4" class="text-center">Loading shop stock...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- Beneficiary Village Readiness -->
+        <section id="beneficiary-tab-readiness" class="tab-pane">
+          <div class="section-header">
+            <h2>Village Distribution Schedule & Readiness</h2>
+            <p>Check if your village ration quota is fulfilled and ready for collection</p>
+          </div>
+
+          <div class="card table-card">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Village Name</th>
+                  <th>Last Distribution Date</th>
+                  <th>Current Readiness</th>
+                </tr>
+              </thead>
+              <tbody id="beneficiary-villages-tbody">
+                <tr><td colspan="3" class="text-center">Loading village schedules...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- Beneficiary Complaints -->
+        <section id="beneficiary-tab-complaints" class="tab-pane">
+          <div class="section-header-flex">
+            <div>
+              <h2>Grievances & Complaints</h2>
+              <p>Submit and track complaints directly with the Civil Supplies Department</p>
+            </div>
+            <button class="btn btn-primary" onclick="showModal('modal-add-complaint')">+ File a Complaint</button>
+          </div>
+
+          <div class="card table-card">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Category</th>
+                  <th>Description</th>
+                  <th>Status</th>
+                  <th>Officer Resolution</th>
+                </tr>
+              </thead>
+              <tbody id="beneficiary-complaints-tbody">
+                <tr><td colspan="5" class="text-center">Loading your complaints...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- Beneficiary Notifications -->
+        <section id="beneficiary-tab-notifications" class="tab-pane">
+          <div class="section-header-flex">
+            <div>
+              <h2>SMS & Distribution Alerts</h2>
+              <p>Official automated alerts in English and Tamil (தமிழ்)</p>
+            </div>
+            <button class="btn btn-outline-sm" onclick="loadBeneficiaryNotifications()">↻ Refresh</button>
+          </div>
+
+          <div id="notifications-list" class="notifications-list">
+            <div class="card text-center p-4">Loading notifications...</div>
+          </div>
+        </section>
+      </div>
+
+    </div>
+  </main>
+
+  <!-- ================= MODALS ================= -->
+
+  <!-- Modal: Add Shop (Admin) -->
+  <div id="modal-add-shop" class="modal-overlay hidden">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3>Create New Fair Price Shop</h3>
+        <button class="modal-close" onclick="closeModal('modal-add-shop')">&times;</button>
+      </div>
+      <form onsubmit="handleCreateShop(event)">
+        <div class="form-group">
+          <label for="shop-name">Shop Name</label>
+          <input type="text" id="shop-name" required placeholder="e.g. FPS Guindy">
+        </div>
+        <div class="form-group">
+          <label for="shop-location">Location Address</label>
+          <input type="text" id="shop-location" required placeholder="e.g. Guindy, Chennai">
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline" onclick="closeModal('modal-add-shop')">Cancel</button>
+          <button type="submit" class="btn btn-primary">Create Shop</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal: Add Village (Admin) -->
+  <div id="modal-add-village" class="modal-overlay hidden">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3>Add New Village</h3>
+        <button class="modal-close" onclick="closeModal('modal-add-village')">&times;</button>
+      </div>
+      <form onsubmit="handleCreateVillage(event)">
+        <div class="form-group">
+          <label for="village-name">Village Name</label>
+          <input type="text" id="village-name" required placeholder="e.g. Kotturpuram">
+        </div>
+        <div class="form-group">
+          <label for="village-shop-id">Assigned Shop ID</label>
+          <input type="number" id="village-shop-id" required placeholder="Shop ID" min="1">
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline" onclick="closeModal('modal-add-village')">Cancel</button>
+          <button type="submit" class="btn btn-primary">Add Village</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal: Add Commodity (Admin) -->
+  <div id="modal-add-commodity" class="modal-overlay hidden">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3>Add Commodity</h3>
+        <button class="modal-close" onclick="closeModal('modal-add-commodity')">&times;</button>
+      </div>
+      <form onsubmit="handleCreateCommodity(event)">
+        <div class="form-group">
+          <label for="commodity-name">Commodity Name</label>
+          <input type="text" id="commodity-name" required placeholder="e.g. Rice, Toor Dal, Sugar">
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline" onclick="closeModal('modal-add-commodity')">Cancel</button>
+          <button type="submit" class="btn btn-primary">Add Commodity</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal: Add Officer / Admin (Admin) -->
+  <div id="modal-add-user" class="modal-overlay hidden">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3>Create Officer or Admin</h3>
+        <button class="modal-close" onclick="closeModal('modal-add-user')">&times;</button>
+      </div>
+      <form onsubmit="handleCreateStaff(event)">
+        <div class="form-group">
+          <label for="staff-username">Username</label>
+          <input type="text" id="staff-username" required placeholder="Min 3 characters">
+        </div>
+        <div class="form-group">
+          <label for="staff-password">Password</label>
+          <input type="password" id="staff-password" required placeholder="Min 8 characters">
+        </div>
+        <div class="form-group">
+          <label for="staff-role">Role</label>
+          <select id="staff-role" required onchange="toggleStaffShopRequirement(this.value)">
+            <option value="officer">FPS Officer</option>
+            <option value="admin">System Admin</option>
+          </select>
+        </div>
+        <div class="form-group" id="group-staff-shop">
+          <label for="staff-shop-id">Assigned Shop ID (Required for officers)</label>
+          <input type="number" id="staff-shop-id" placeholder="Shop ID" min="1">
+        </div>
+        <div class="form-group">
+          <label for="staff-phone">Phone Number</label>
+          <input type="tel" id="staff-phone" placeholder="+919876543210">
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline" onclick="closeModal('modal-add-user')">Cancel</button>
+          <button type="submit" class="btn btn-primary">Create User</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal: Add Stock (Officer) -->
+  <div id="modal-add-stock" class="modal-overlay hidden">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3>Receive Stock Shipment</h3>
+        <button class="modal-close" onclick="closeModal('modal-add-stock')">&times;</button>
+      </div>
+      <form onsubmit="handleAddStock(event)">
+        <div class="form-group">
+          <label for="stock-commodity-select">Commodity</label>
+          <select id="stock-commodity-select" required>
+            <option value="">Select commodity...</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="stock-quantity">Quantity (kg / Litres)</label>
+          <input type="number" id="stock-quantity" required min="0.001" step="0.001" placeholder="e.g. 500.000">
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline" onclick="closeModal('modal-add-stock')">Cancel</button>
+          <button type="submit" class="btn btn-primary">Add Stock</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal: Update Stock Quantity (Officer) -->
+  <div id="modal-update-stock" class="modal-overlay hidden">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3>Adjust Stock Level</h3>
+        <button class="modal-close" onclick="closeModal('modal-update-stock')">&times;</button>
+      </div>
+      <form onsubmit="handleUpdateStock(event)">
+        <input type="hidden" id="edit-stock-id">
+        <div class="form-group">
+          <label id="edit-stock-commodity-name">Commodity</label>
+          <input type="number" id="edit-stock-quantity" required min="0.001" step="0.001">
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline" onclick="closeModal('modal-update-stock')">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save Adjustment</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal: Commodity Status (Officer/Admin) -->
+  <div id="modal-commodity-status" class="modal-overlay hidden">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3>Set Commodity Availability Status</h3>
+        <button class="modal-close" onclick="closeModal('modal-commodity-status')">&times;</button>
+      </div>
+      <form onsubmit="handleSetCommodityStatus(event)">
+        <div class="form-group">
+          <label for="status-commodity-select">Commodity</label>
+          <select id="status-commodity-select" required>
+            <option value="">Select commodity...</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="status-value">Status</label>
+          <select id="status-value" required>
+            <option value="active">Active (Available)</option>
+            <option value="seasonally_suspended">Seasonally Suspended</option>
+            <option value="out_of_stock">Out of Stock</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="status-reason">Reason / Remarks</label>
+          <input type="text" id="status-reason" placeholder="e.g. Not supplied this season">
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline" onclick="closeModal('modal-commodity-status')">Cancel</button>
+          <button type="submit" class="btn btn-primary">Apply Status</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal: Add Historical Distribution (Officer) -->
+  <div id="modal-add-history" class="modal-overlay hidden">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3>Add Historical Distribution</h3>
+        <button class="modal-close" onclick="closeModal('modal-add-history')">&times;</button>
+      </div>
+      <form onsubmit="handleAddForecastHistory(event)">
+        <div class="form-group">
+          <label for="hist-commodity-select">Commodity</label>
+          <select id="hist-commodity-select" required></select>
+        </div>
+        <div class="form-group">
+          <label for="hist-quantity">Distributed Quantity</label>
+          <input type="number" id="hist-quantity" required min="1" step="0.001" placeholder="e.g. 750">
+        </div>
+        <div class="form-group">
+          <label for="hist-date">Distribution Date</label>
+          <input type="date" id="hist-date" required>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline" onclick="closeModal('modal-add-history')">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save Record</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal: Set Village Requirements (Officer) -->
+  <div id="modal-village-requirement" class="modal-overlay hidden">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3 id="req-modal-title">Configure Village Requirement</h3>
+        <button class="modal-close" onclick="closeModal('modal-village-requirement')">&times;</button>
+      </div>
+      <form onsubmit="handleUpsertVillageRequirement(event)">
+        <input type="hidden" id="req-village-id">
+        <div class="form-group">
+          <label for="req-commodity-select">Commodity</label>
+          <select id="req-commodity-select" required></select>
+        </div>
+        <div class="form-group">
+          <label for="req-quantity">Required Quota (kg/L)</label>
+          <input type="number" id="req-quantity" required min="1" step="0.001" placeholder="e.g. 120">
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline" onclick="closeModal('modal-village-requirement')">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save Quota</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal: Update Complaint Status (Officer) -->
+  <div id="modal-update-complaint" class="modal-overlay hidden">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3>Resolve Complaint</h3>
+        <button class="modal-close" onclick="closeModal('modal-update-complaint')">&times;</button>
+      </div>
+      <form onsubmit="handleUpdateComplaintStatus(event)">
+        <input type="hidden" id="edit-complaint-id">
+        <div class="form-group">
+          <label for="complaint-status-select">Status</label>
+          <select id="complaint-status-select" required>
+            <option value="in_progress">In Progress</option>
+            <option value="resolved">Resolved</option>
+            <option value="rejected">Rejected</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="complaint-note">Resolution Note</label>
+          <textarea id="complaint-note" rows="3" placeholder="Provide reason or resolution details..."></textarea>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline" onclick="closeModal('modal-update-complaint')">Cancel</button>
+          <button type="submit" class="btn btn-primary">Update Complaint</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal: File Complaint (Beneficiary) -->
+  <div id="modal-add-complaint" class="modal-overlay hidden">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3>File a Grievance</h3>
+        <button class="modal-close" onclick="closeModal('modal-add-complaint')">&times;</button>
+      </div>
+      <form onsubmit="handleCreateComplaint(event)">
+        <div class="form-group">
+          <label for="comp-category">Category</label>
+          <select id="comp-category" required>
+            <option value="quality">Quality Issue (Grain condition, adulteration)</option>
+            <option value="quantity">Quantity Issue (Underweighing)</option>
+            <option value="availability">Availability (Ration not in stock)</option>
+            <option value="behaviour">Staff Behaviour</option>
+            <option value="other">Other</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="comp-description">Description</label>
+          <textarea id="comp-description" required rows="4" minlength="5" maxlength="1000" placeholder="Detail your grievance (minimum 5 characters)..."></textarea>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline" onclick="closeModal('modal-add-complaint')">Cancel</button>
+          <button type="submit" class="btn btn-primary">Submit Complaint</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- App Script -->
+  <script src="app.js"></script>
+</body>
+</html>
