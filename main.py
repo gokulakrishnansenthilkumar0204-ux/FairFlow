@@ -1,8 +1,3 @@
-"""FairFlow API.
-
-FastAPI validates requests, authenticates (JWT), authorizes (role + shop) and shapes
-responses. Every database operation is a PostgreSQL routine run through db.call().
-"""
 
 import os
 from contextlib import asynccontextmanager
@@ -10,7 +5,7 @@ from datetime import date
 from decimal import Decimal
 from typing import Annotated, Literal
 
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, status
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import AfterValidator, BaseModel, Field
@@ -19,6 +14,9 @@ from auth import authenticate, create_access_token, get_current_user, hash_passw
 from biometric import get_biometric_adapter
 from db import call
 from notifications import notify
+from passkeys import ACTIVATION_TTL_HOURS, RP_ID, Phone, Username, hash_code, new_activation_code
+from passkeys import router as passkey_router
+from ratelimit import limit
 from setup_db import check_installed
 
 @asynccontextmanager
@@ -29,11 +27,40 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(title="FairFlow API", lifespan=lifespan)
 
+
 _origins = [o.strip() for o in os.getenv("CORS_ORIGINS", "").split(",") if o.strip()]
-if not _origins:
-    _origins = ["*"]
-app.add_middleware(CORSMiddleware, allow_origins=_origins, allow_credentials=True,
-                   allow_methods=["*"], allow_headers=["*"])
+if _origins:
+    app.add_middleware(CORSMiddleware, allow_origins=_origins, allow_methods=["*"],
+                       allow_headers=["*"])
+
+_CSP = ("default-src 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; "
+        "font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; "
+        "frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("Referrer-Policy", "no-referrer")
+    path = request.url.path
+    if not (path.startswith("/docs") or path.startswith("/redoc")):  # Swagger UI loads from a CDN
+        response.headers.setdefault("Content-Security-Policy", _CSP)
+    return response
+
+
+app.include_router(passkey_router)
+
+
+def password_login_enabled() -> bool:
+    
+    return os.getenv("ALLOW_PASSWORD_LOGIN", "false").lower() in ("1", "true", "yes")
+
+
+def require_password_login():
+    if not password_login_enabled():
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Password sign-in is disabled. Use fingerprint (passkey) sign-in.")
 
 
 User = Annotated[dict, Depends(get_current_user)]
@@ -57,14 +84,28 @@ def get_or_404(routine: str, *args, detail: str) -> dict:
     return row
 
 
+def pending_approval(user: dict) -> bool:
+    
+    return user["role"] == "beneficiary" and not user.get("approved", True)
+
+
+_PENDING = "Your account is waiting for approval by your shop officer"
+
+
 def shop_scope(user: dict) -> int | None:
-    """Shop filter for reads: None = all shops (admin); 0 = none (user without a shop)."""
-    return None if user["role"] == "admin" else (user["shop_id"] or 0)
+    
+    if user["role"] == "admin":
+        return None
+    return 0 if pending_approval(user) else (user["shop_id"] or 0)
 
 
 def check_shop_access(user: dict, shop_id: int, detail: str):
-    """Admin: any shop. Officer/beneficiary: only their assigned shop."""
-    if user["role"] != "admin" and user["shop_id"] != shop_id:
+    
+    if user["role"] == "admin":
+        return
+    if pending_approval(user):
+        forbid(_PENDING)
+    if user["shop_id"] != shop_id:
         forbid(detail)
 
 
@@ -79,7 +120,6 @@ def _bcrypt_limit(password: str) -> str:
 Password = Annotated[str, Field(min_length=8, max_length=72), AfterValidator(_bcrypt_limit)]
 Quantity = Annotated[Decimal, Field(gt=0, max_digits=12, decimal_places=3)]
 PositiveId = Annotated[int, Field(gt=0)]
-Phone = Annotated[str | None, Field(default=None, pattern=r"^\+?[0-9]{10,15}$")]
 
 
 class ShopCreate(BaseModel):
@@ -107,7 +147,7 @@ class StockUpdate(BaseModel):
 
 
 class UserCreate(BaseModel):
-    username: str = Field(min_length=3, max_length=50)
+    username: Username
     password: Password
     # Public signup always creates a beneficiary; any "role" field sent is ignored.
     shop_id: PositiveId | None = None
@@ -115,8 +155,8 @@ class UserCreate(BaseModel):
 
 
 class AdminUserCreate(BaseModel):
-    username: str = Field(min_length=3, max_length=50)
-    password: Password
+    username: Username
+    password: Password | None = None  # optional: staff sign in with a fingerprint passkey
     role: Literal["officer", "admin"]
     shop_id: PositiveId | None = None
     phone: Phone = None
@@ -149,12 +189,6 @@ class BiometricVerificationRequest(BaseModel):
     capture_token: str = Field(min_length=1, max_length=8192)
 
 
-class BiometricLogin(BaseModel):
-    username: str = Field(min_length=1, max_length=50)
-    capture_token: str = Field(min_length=1, max_length=8192)
-
-
-
 class ComplaintCreate(BaseModel):
     category: Literal["quality", "quantity", "availability", "behaviour", "other"]
     description: str = Field(min_length=5, max_length=1000)
@@ -167,15 +201,36 @@ class ComplaintStatusUpdate(BaseModel):
 
 # ---------- Auth endpoints ----------
 
-@app.post("/signup", status_code=status.HTTP_201_CREATED)
+@app.get("/config")
+def public_config():
+    """Non-secret settings the frontend needs before sign-in."""
+    return {
+        "webauthn_rp_id": RP_ID,
+        "password_login_enabled": password_login_enabled(),
+        "biometric_provider": os.getenv("BIOMETRIC_PROVIDER", "disabled"),
+        "activation_code_ttl_hours": ACTIVATION_TTL_HOURS,
+    }
+
+
+@app.get("/public/shops")
+def public_shops():
+    """Shop names/locations for the signup form (public information)."""
+    return call("ff_list_shops", None)
+
+
+@app.post("/signup", status_code=status.HTTP_201_CREATED, dependencies=[Depends(limit("auth-options"))])
 def signup(user: UserCreate):
+    """Password signup (disabled by default; use /auth/passkey/signup/*)."""
+    require_password_login()
     row = call("ff_create_user", None, user.username, hash_password(user.password),
-               "beneficiary", user.shop_id, user.phone, one=True)
+               "beneficiary", user.shop_id, user.phone, False, one=True)
     return {"id": row["id"], "username": row["username"], "role": row["role"]}
 
 
-@app.post("/login")
+@app.post("/login", dependencies=[Depends(limit("auth-verify"))])
 def login(form_data: OAuth2PasswordRequestForm = Depends()):
+    """Password sign-in (disabled by default; use /auth/passkey/login/*)."""
+    require_password_login()
     user = authenticate(form_data.username, form_data.password)
     if not user:
         raise HTTPException(
@@ -183,44 +238,7 @@ def login(form_data: OAuth2PasswordRequestForm = Depends()):
             detail="Incorrect username or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    token = create_access_token({"sub": user["username"], "role": user["role"]})
-    return {"access_token": token, "token_type": "bearer"}
-
-
-@app.post("/biometric-login")
-def biometric_login(item: BiometricLogin):
-    user = call("ff_get_user_by_username", item.username, one=True)
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Biometric profile not found for specified user",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    # Check capture token:
-    token_valid = (
-        item.capture_token == "MOCK-MATCH"
-        or "bio" in item.capture_token.lower()
-        or item.capture_token.startswith("scan_")
-        or "pass" in item.capture_token.lower()
-    )
-    if not token_valid:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Biometric verification failed: Fingerprint scan did not match registered biometric template",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    token = create_access_token({"sub": user["username"], "role": user["role"]})
-    return {
-        "access_token": token,
-        "token_type": "bearer",
-        "biometric_verified": True,
-        "user": {
-            "id": user["id"],
-            "username": user["username"],
-            "role": user["role"],
-            "shop_id": user["shop_id"],
-        },
-    }
+    return {"access_token": create_access_token(user), "token_type": "bearer"}
 
 
 @app.get("/me")
@@ -229,12 +247,17 @@ def get_me(current_user: User):
 
 
 
-
 @app.post("/admin/users", status_code=status.HTTP_201_CREATED)
 def create_user_by_admin(user: AdminUserCreate, current_user: User):
     require_role(current_user, "admin", detail="Only admin can create officer or admin users")
-    return call("ff_create_user", current_user["id"], user.username,
-                hash_password(user.password), user.role, user.shop_id, user.phone, one=True)
+    # Account and first activation code are created in one transaction.
+    code = new_activation_code()
+    row = call("ff_create_user_with_code", current_user["id"], user.username,
+               hash_password(user.password) if user.password else None,
+               user.role, user.shop_id, user.phone, hash_code(code), ACTIVATION_TTL_HOURS * 3600, one=True)
+    # Shown once: the new user enters it to register their fingerprint passkey.
+    expires_at = row.pop("expires_at")
+    return row | {"activation_code": code, "activation_expires_at": expires_at}
 
 
 # ---------- Shops, villages, commodities ----------
@@ -357,11 +380,12 @@ def _get_forecast_access(shop_id: int, current_user: dict):
     forbid("Not authorized to view demand forecasts")
 
 
-def _linear_regression_forecast(values: list[float]) -> tuple[float, float, float]:
+def _linear_regression_forecast(values: list[float], steps_ahead: int = 1) -> tuple[float, float, float]:
     """Train a simple univariate linear regression on sequential months.
 
     x = 1, 2, ..., n represents the month number and y represents the
-    quantity distributed in that month. Returns (forecast, slope, intercept).
+    quantity distributed in that month. Predicts x = n + steps_ahead.
+    Returns (forecast, slope, intercept).
     """
     n = len(values)
     if n < 2:
@@ -375,7 +399,7 @@ def _linear_regression_forecast(values: list[float]) -> tuple[float, float, floa
 
     slope = numerator / denominator if denominator else 0.0
     intercept = y_mean - slope * x_mean
-    forecast = intercept + slope * (n + 1)
+    forecast = intercept + slope * (n + steps_ahead)
     return max(0.0, forecast), slope, intercept
 
 
@@ -391,15 +415,28 @@ def _recommendation(predicted_demand: float, current_stock: float) -> str:
     return "STOCK_MATCHES_FORECAST"
 
 
+def _next_month(month: str) -> str:
+    year, mon = map(int, month.split("-"))
+    year, mon = divmod(year * 12 + mon, 12)  # mon is 1-based, so this is "+1 month"
+    return f"{year:04d}-{mon + 1:02d}"
+
+
 def _forecast(rows: list[dict]) -> dict:
-    """rows: one commodity's calendar months (gaps already filled with 0 by the DB)."""
-    history = [{"month": r["month"], "quantity": float(r["quantity"])} for r in rows]
-    result = {"history": history}
-    if len(history) < 2:
+    """rows: one commodity's calendar months up to the current month (gaps filled with 0
+    by the DB). The current month is still running, so it is shown but not used for
+    training; the forecast is for the NEXT calendar month after it."""
+    history = [{"month": r["month"], "quantity": float(r["quantity"]), "partial": bool(r["is_partial"])}
+               for r in rows]
+    complete = [h["quantity"] for h in history if not h["partial"]]
+    result = {"history": history, "months_used": len(complete)}
+    if len(complete) < 2:
         return result
-    predicted, slope, intercept = _linear_regression_forecast([h["quantity"] for h in history])
+    # Steps from the last complete month to next month: 2 when the current month is in progress.
+    steps_ahead = 1 + sum(1 for h in history if h["partial"])
+    predicted, slope, intercept = _linear_regression_forecast(complete, steps_ahead)
     current_stock = float(rows[0]["current_stock"])
     return result | {
+        "forecast_month": _next_month(history[-1]["month"]),
         "predicted_next_month_demand": round(predicted, 2),
         "current_stock": round(current_stock, 2),
         "reorder_quantity": round(_reorder_quantity(predicted, current_stock), 2),
@@ -422,8 +459,8 @@ def forecast_demand(shop_id: int, commodity_id: int, current_user: User):
     if "predicted_next_month_demand" not in forecast:
         return base | {
             "status": "insufficient_data",
-            "message": "At least 2 different months of distribution history are required",
-            "months_available": len(forecast["history"]),
+            "message": "At least 2 complete months of distribution history are required",
+            "months_available": forecast["months_used"],
             "history": forecast["history"],
         }
     return base | {"status": "success"} | forecast
@@ -470,6 +507,16 @@ def add_village_requirement(village_id: int, item: VillageRequirementCreate, cur
                 item.commodity_id, item.quantity, one=True)
 
 
+@app.delete("/villages/{village_id}/requirements/{commodity_id}")
+def remove_village_requirement(village_id: int, commodity_id: int, current_user: User):
+    """Stop giving a commodity to a village (removes its per-round requirement)."""
+    require_role(current_user, "admin", "officer",
+                 detail="Only officers or admin can manage village requirements")
+    _get_village(village_id, current_user)
+    call("ff_delete_village_requirement", current_user["id"], village_id, commodity_id)
+    return {"message": "Requirement removed", "village_id": village_id, "commodity_id": commodity_id}
+
+
 @app.get("/villages/{village_id}/requirements")
 def get_village_requirements(village_id: int, current_user: User):
     _get_village(village_id, current_user)
@@ -501,6 +548,22 @@ def check_village_readiness(village_id: int, current_user: User):
     if not checks:
         response["reason"] = "Village requirements are not configured"
     return response
+
+
+@app.get("/shops/{shop_id}/village-overview")
+def get_village_overview(shop_id: int, current_user: User):
+    """Requirements and readiness of every village of a shop in one request."""
+    check_shop_access(current_user, shop_id, "User can only view villages of their assigned shop")
+    out = []
+    for v in call("ff_list_villages", shop_id, None):
+        checks = call("ff_village_requirement_check", v["id"])
+        out.append({
+            "village_id": v["id"],
+            "requirements": call("ff_list_village_requirements", v["id"]),
+            "is_ready": bool(checks) and all(c["state"] == "ok" for c in checks),
+            "configured": bool(checks),
+        })
+    return out
 
 
 @app.get("/shops/{shop_id}/next-village")
@@ -582,6 +645,8 @@ def _get_complaint(complaint_id: int, current_user: dict) -> dict:
 @app.post("/complaints", status_code=status.HTTP_201_CREATED)
 def create_complaint(item: ComplaintCreate, current_user: User):
     require_role(current_user, "beneficiary", detail="Only beneficiaries can submit complaints")
+    if pending_approval(current_user):
+        forbid(_PENDING)
     return call("ff_create_complaint", current_user["id"], item.category, item.description, one=True)
 
 

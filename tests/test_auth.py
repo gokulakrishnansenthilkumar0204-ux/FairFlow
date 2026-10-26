@@ -59,7 +59,10 @@ def test_admin_user_creation_rules(client, world):
     assert client.post("/admin/users", json=payload, headers=world.admin).status_code == 400  # no shop
     assert client.post("/admin/users", json=payload | {"shop_id": 9}, headers=world.admin).status_code == 404
     r = client.post("/admin/users", json=payload | {"shop_id": 2}, headers=world.admin)
-    assert r.status_code == 201 and r.json() == {"id": r.json()["id"], "username": "off3", "role": "officer", "shop_id": 2}
+    body = r.json()
+    assert r.status_code == 201 and {k: body[k] for k in ("username", "role", "shop_id")} == \
+        {"username": "off3", "role": "officer", "shop_id": 2}
+    assert len(body["activation_code"]) == 11 and body["activation_expires_at"]
     bad_admin = {"username": "adm2", "password": "password123", "role": "admin", "shop_id": 1}
     assert client.post("/admin/users", json=bad_admin, headers=world.admin).status_code == 400
     assert client.post("/admin/users", json=payload | {"role": "beneficiary", "shop_id": 1},

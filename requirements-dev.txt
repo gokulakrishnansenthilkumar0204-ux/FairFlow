@@ -1,3 +1,4 @@
 -r requirements.txt
 pytest==8.4.2
-httpx==0.28.1
+httpx2==2.15.1  # test client transport (starlette prefers httpx2; plain httpx is deprecated)
+# optional, for e2e/browser_test.py:  pip install playwright==1.64.0 && playwright install chromium

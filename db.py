@@ -13,12 +13,14 @@ from contextlib import contextmanager
 
 import psycopg2
 from fastapi import HTTPException
+from psycopg2.extensions import parse_dsn
 from psycopg2.extras import RealDictCursor
-from psycopg2.pool import ThreadedConnectionPool
+from psycopg2.pool import PoolError, ThreadedConnectionPool
 
 log = logging.getLogger("fairflow.db")
 
 _ROUTINE_NAME = re.compile(r"^ff_[a-z_]+$")
+_TIMEZONE_NAME = re.compile(r"^[A-Za-z_]+(/[A-Za-z0-9_+\-]+)*$")
 _RETRYABLE = {"40P01", "40001"}  # deadlock, serialization failure
 _STATUS = {"FF400": 400, "FF403": 403, "FF404": 404, "FF409": 409}
 _GENERIC = {
@@ -44,11 +46,55 @@ def database_url() -> str:
     return url
 
 
-def _get_pool() -> ThreadedConnectionPool:
+def app_timezone() -> str:
+    """Time zone for CURRENT_DATE/now() in every session (distribution dates, 'same day')."""
+    tz = os.getenv("APP_TIMEZONE", "Asia/Kolkata")
+    if not _TIMEZONE_NAME.match(tz):
+        raise RuntimeError(f"APP_TIMEZONE is not a valid time zone name: {tz!r}")
+    return tz
+
+
+def connect_kwargs(dsn: str) -> dict:
+    """Keep any options already in the DSN and add the application time zone."""
+    existing = parse_dsn(dsn).get("options", "")
+    return {"options": f"{existing} -c timezone={app_timezone()}".strip()}
+
+
+class PoolTimeout(Exception):
+    """No database connection became free in time."""
+
+
+class _BlockingPool:
+    """ThreadedConnectionPool raises as soon as it is empty. FastAPI runs up to 40
+    requests at once, so callers instead wait (up to DB_POOL_TIMEOUT seconds) for a
+    free connection; only a real overload returns 503."""
+
+    def __init__(self, maxconn: int, dsn: str):
+        self._pool = ThreadedConnectionPool(1, maxconn, dsn, **connect_kwargs(dsn))
+        self._slots = threading.BoundedSemaphore(maxconn)
+        self._timeout = float(os.getenv("DB_POOL_TIMEOUT", "30"))
+
+    def getconn(self):
+        if not self._slots.acquire(timeout=self._timeout):
+            raise PoolTimeout()
+        try:
+            return self._pool.getconn()
+        except Exception:
+            self._slots.release()
+            raise
+
+    def putconn(self, conn, close: bool = False):
+        try:
+            self._pool.putconn(conn, close=close)
+        finally:
+            self._slots.release()
+
+
+def _get_pool() -> _BlockingPool:
     global _pool
     with _pool_lock:
         if _pool is None:
-            _pool = ThreadedConnectionPool(1, int(os.getenv("DB_POOL_MAX", "10")), database_url())
+            _pool = _BlockingPool(int(os.getenv("DB_POOL_MAX", "10")), database_url())
         return _pool
 
 
@@ -79,7 +125,7 @@ def _http_error(routine: str, exc: psycopg2.Error) -> HTTPException:
         return HTTPException(503, "Database routines are not installed; run setup_db.py")
     # Log the routine and error class only: never parameters (may hold hashes/PII).
     log.error("Database error in %s: %s %s", routine, code, type(exc).__name__)
-    if isinstance(exc, psycopg2.OperationalError):
+    if isinstance(exc, (psycopg2.OperationalError, PoolError)):
         return HTTPException(503, "Database unavailable")
     return HTTPException(500, "Database error")
 
@@ -96,6 +142,9 @@ def call(routine: str, *args, one: bool = False, attempts: int = 3):
                 cur.execute(sql, args)
                 rows = [dict(row) for row in cur.fetchall()]
             break
+        except PoolTimeout:
+            log.error("No database connection free for %s; raise DB_POOL_MAX or check load", routine)
+            raise HTTPException(503, "Server is busy; please try again") from None
         except psycopg2.Error as exc:
             # The whole routine ran in one rolled-back transaction, so retrying is safe.
             if exc.pgcode in _RETRYABLE and attempt < attempts:

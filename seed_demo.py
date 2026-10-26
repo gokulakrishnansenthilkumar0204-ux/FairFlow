@@ -4,16 +4,18 @@
 
 Uses the same DATABASE_URL and ff_* routines as the API. Safe to re-run: anything
 that already exists (matched by name/username) is left unchanged. Refuses to run
-when APP_ENV=production. All demo users share the password printed at the end.
+when APP_ENV=production.
+
+Demo users have no password: sign-in is by fingerprint passkey. For every demo user
+that has no passkey yet, a one-time activation code is printed; enter it under
+"Activate account" in the app and touch the fingerprint sensor.
 """
 
 import os
 from datetime import date
 
-from auth import hash_password
 from db import call
-
-PASSWORD = "Demo@1234"
+from passkeys import issue_activation_code
 
 SHOPS = [  # name, location, villages
     ("FPS Guindy", "Guindy, Chennai", ["Kotturpuram", "Saidapet", "Little Mount"]),
@@ -37,7 +39,7 @@ def months_back(n: int) -> date:
 
 def ensure_user(actor, username, role, shop_id=None, phone=None):
     if not call("ff_get_user_by_username", username, one=True):
-        call("ff_create_user", actor, username, hash_password(PASSWORD), role, shop_id, phone)
+        call("ff_create_user", actor, username, None, role, shop_id, phone)
     return call("ff_get_user_by_username", username, one=True)["id"]
 
 
@@ -83,35 +85,17 @@ def main():
                     call("ff_add_forecast_history", officer, shop_id, commodities[commodity],
                          total, months_back(len(totals) - i))
 
-    print("Demo data ready.\n")
-    print(f"All demo users have password: {PASSWORD}")
-    print("  admin_demo                 admin")
-    for n, (shop_name, *_rest) in enumerate(SHOPS, start=1):
-        print(f"  officer{n} / beneficiary{n}   {shop_name}")
-    print("\nShops:", ", ".join(f"{s['id']}={s['name']}" for s in call("ff_list_shops", None)))
-
+    print("Demo data ready.")
+    print("Shops:", ", ".join(f"{s['id']}={s['name']}" for s in call("ff_list_shops", None)))
+    print("\nActivation codes (one-time; enter under 'Activate account', then touch your fingerprint):")
+    demo = ["admin_demo"] + [f"{r}{n}" for n in range(1, len(SHOPS) + 1) for r in ("officer", "beneficiary")]
+    for username in demo:
+        user = call("ff_get_user_by_username", username, one=True)
+        if call("ff_list_passkeys", user["id"]):
+            print(f"  {username:<14} already has a passkey")
+        else:
+            info = issue_activation_code(admin, user["id"])
+            print(f"  {username:<14} {info['activation_code']}   ({user['role']})")
 
 if __name__ == "__main__":
     main()
-
-
-
-
-
-
-
-    public | audit_log               | table | test
- public |  public | biometric_verifications | table | test
- | table | test
- public | commodities             | table | test
- public | commodity_status        | table | test
- public | complaints              | table | test
- public | distribution_history    | table | test
- public | migration_invalid_dates | table | test
- public | notifications           | table | test
- public | shops                   | table | test
- public | stock                   | table | test
- public | users                   | table | test
- public | village_requirements    | table | test
- public | villages                | table | test
-(13 rows)

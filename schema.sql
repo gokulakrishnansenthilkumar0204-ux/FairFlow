@@ -68,7 +68,7 @@ CREATE TABLE IF NOT EXISTS commodities (
 CREATE TABLE IF NOT EXISTS users (
     id              SERIAL PRIMARY KEY,
     username        TEXT NOT NULL UNIQUE,
-    hashed_password TEXT NOT NULL,
+    hashed_password TEXT,            -- NULL for passkey-only accounts
     role            TEXT NOT NULL,
     shop_id         INTEGER REFERENCES shops(id),
     phone           TEXT
@@ -150,9 +150,56 @@ CREATE TABLE IF NOT EXISTS audit_log (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- ---------- Passkey (WebAuthn) authentication ----------
+-- Only public keys are stored. Fingerprints/biometric templates never leave the
+-- user's device; the device's authenticator verifies the fingerprint locally.
+CREATE TABLE IF NOT EXISTS webauthn_credentials (
+    id            SERIAL PRIMARY KEY,
+    user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    credential_id TEXT NOT NULL UNIQUE,           -- base64url
+    public_key    BYTEA NOT NULL,                 -- COSE public key
+    sign_count    BIGINT NOT NULL DEFAULT 0,
+    transports    TEXT[] NOT NULL DEFAULT '{}',
+    device_label  TEXT NOT NULL DEFAULT 'Passkey',
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    last_used_at  TIMESTAMPTZ
+);
+
+-- Single-use, short-lived WebAuthn challenges (stored server-side, not in the client).
+CREATE TABLE IF NOT EXISTS auth_challenges (
+    challenge  TEXT PRIMARY KEY,                  -- base64url
+    purpose    TEXT NOT NULL,                     -- signup | enroll | add | login
+    user_id    INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    details    JSONB NOT NULL DEFAULT '{}',
+    expires_at TIMESTAMPTZ NOT NULL
+);
+
+-- One-time activation codes that let a person bind a passkey to an existing account.
+-- Only a SHA-256 hash of the code is stored.
+CREATE TABLE IF NOT EXISTS enrollment_codes (
+    id         SERIAL PRIMARY KEY,
+    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    code_hash  TEXT NOT NULL,
+    created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    attempts   INTEGER NOT NULL DEFAULT 0,
+    expires_at TIMESTAMPTZ NOT NULL,
+    used_at    TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 -- ---------- Migrations for tables created by the old SQLAlchemy models ----------
 
 ALTER TABLE users ADD COLUMN IF NOT EXISTS phone TEXT;
+-- Passkey (WebAuthn) accounts have no password.
+ALTER TABLE users ALTER COLUMN hashed_password DROP NOT NULL;
+-- Stable random WebAuthn user handle (never the username or database id).
+ALTER TABLE users ADD COLUMN IF NOT EXISTS webauthn_handle TEXT;
+-- Access control: disabled accounts cannot sign in; self-registered beneficiaries see
+-- shop data only after their shop officer approves them; bumping token_version ends
+-- every session the user has open (deactivation, role change, revoked devices).
+ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS approved BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS token_version INTEGER NOT NULL DEFAULT 0;
 
 -- VARCHAR -> TEXT (binary compatible, no data change) so routine return types match exactly.
 DO $$
@@ -221,7 +268,7 @@ END $$;
 -- Old models left these nullable.
 SELECT pg_temp.set_not_null(t, c) FROM (VALUES
     ('shops', 'name'), ('shops', 'location'), ('villages', 'name'), ('villages', 'shop_id'),
-    ('commodities', 'name'), ('users', 'username'), ('users', 'hashed_password'), ('users', 'role')
+    ('commodities', 'name'), ('users', 'username'), ('users', 'role')
 ) AS v(t, c);
 
 -- Merge duplicate stock rows (formerly migrate_stock_management.py) before adding the
@@ -262,6 +309,7 @@ SELECT pg_temp.add_constraint(t, n, d) FROM (VALUES
     ('complaints', 'ck_complaint_status', 'CHECK (status IN (''open'', ''in_progress'', ''resolved'', ''rejected''))'),
     ('complaints', 'ck_complaint_category',
         'CHECK (category IN (''quality'', ''quantity'', ''availability'', ''behaviour'', ''other''))'),
+    ('auth_challenges', 'ck_challenge_purpose', 'CHECK (purpose IN (''signup'', ''enroll'', ''add'', ''login''))'),
     ('notifications', 'ck_notification_status',
         'CHECK (status IN (''simulated'', ''accepted'', ''failed'', ''skipped_no_phone'', ''disabled''))')
 ) AS v(t, n, d);
@@ -271,3 +319,9 @@ CREATE INDEX IF NOT EXISTS ix_history_shop_commodity_date
 CREATE INDEX IF NOT EXISTS ix_complaints_shop ON complaints (shop_id);
 CREATE INDEX IF NOT EXISTS ix_notifications_user ON notifications (user_id);
 CREATE INDEX IF NOT EXISTS ix_audit_log_created ON audit_log (created_at);
+CREATE INDEX IF NOT EXISTS ix_webauthn_credentials_user ON webauthn_credentials (user_id);
+CREATE INDEX IF NOT EXISTS ix_enrollment_codes_user ON enrollment_codes (user_id);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_users_webauthn_handle ON users (webauthn_handle);
+-- Usernames are matched case-insensitively ("Meena" = "meena"). Not UNIQUE, so legacy
+-- rows that differ only in case do not block setup; new duplicates are refused by ff_create_user.
+CREATE INDEX IF NOT EXISTS ix_users_username_lower ON users (lower(username));

@@ -4,6 +4,5 @@ __pycache__/
 .venv/
 venv/
 .env
-*.dump
-run.sh
-.venv/
+FairFlow_repo/
+fairflow_backup.dump

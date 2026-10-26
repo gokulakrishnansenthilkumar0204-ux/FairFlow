@@ -1,7 +1,8 @@
 """Application authentication: bcrypt password hashes + short-lived JWT sessions.
 
-This is *application* login (who may use which API). Beneficiary identity
-verification at the shop counter is separate - see biometric.py.
+Sessions are JWTs issued after fingerprint (passkey) sign-in - see passkeys.py.
+Password helpers remain for the optional ALLOW_PASSWORD_LOGIN mode and tests.
+Beneficiary identity verification at the shop counter is separate - see biometric.py.
 """
 
 import os
@@ -45,13 +46,22 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 
 def authenticate(username: str, password: str) -> dict | None:
     user = call("ff_get_user_by_username", username, one=True)
-    valid = verify_password(password, user["hashed_password"] if user else _DUMMY_HASH)
-    return user if user and valid else None
+    stored = user["hashed_password"] if user and user["hashed_password"] else _DUMMY_HASH
+    valid = verify_password(password, stored)
+    return user if user and user["hashed_password"] and user["is_active"] and valid else None
 
 
-def create_access_token(data: dict) -> str:
+def create_access_token(user: dict) -> str:
+    """Session token. `tv` (token_version) lets the server end all of a user's sessions
+    at once - deactivation, role change or revoked devices bump it in the database."""
     expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    return jwt.encode({**data, "exp": expire}, SECRET_KEY, algorithm=ALGORITHM)
+    claims = {"sub": user["username"], "tv": int(user.get("token_version") or 0), "exp": expire}
+    return jwt.encode(claims, SECRET_KEY, algorithm=ALGORITHM)
+
+
+def public_user(user: dict) -> dict:
+    """The user fields clients may see (no hash, no token version)."""
+    return {k: user[k] for k in ("id", "username", "role", "shop_id", "is_active", "approved") if k in user}
 
 
 def get_current_user(
@@ -69,7 +79,9 @@ def get_current_user(
         raise _UNAUTHORIZED
 
     user = call("ff_get_user_by_username", username, one=True)
-    if user is None:
+    if user is None or not user["is_active"]:
         raise _UNAUTHORIZED
-    user.pop("hashed_password")
-    return user
+    # Sessions issued before a deactivation / role change / device revocation are void.
+    if payload.get("tv", 0) != user["token_version"]:
+        raise _UNAUTHORIZED
+    return public_user(user)

@@ -1,5 +1,6 @@
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from threading import Barrier
 
 from fastapi.testclient import TestClient
@@ -25,7 +26,7 @@ def test_successful_distribution(client, world):
 
     r = distribute(client, world.officer, 1)
     assert r.status_code == 200, r.text
-    today = date.today().isoformat()
+    today = datetime.now(ZoneInfo("Asia/Kolkata")).date().isoformat()  # APP_TIMEZONE
     assert r.json() == {
         "message": "Distribution completed and stock updated", "village_id": 1, "village_name": "V1",
         "distribution_date": today,

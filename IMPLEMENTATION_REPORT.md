@@ -1,6 +1,38 @@
 # FairFlow Backend: Refactor Report
 
-Date: 2026-10-14 · Python 3.13 · PostgreSQL 16 · see `README.md` for setup and commands.
+Date: 2026-10-14, updated 2026-10-21 · Python 3.13 · PostgreSQL 16 · see `README.md` for setup and commands.
+
+## 0. Update 2026-10-21: fixes and fingerprint sign-in flow
+
+Current state: **50 routines, 74 tests passing**, browser walkthrough passing. Sections 1-6
+below describe the original 2026-10-14 refactor (their counts are from that date).
+
+**Sign-in (web and mobile app), the same for every role:** register the fingerprint once
+(beneficiary: self-registration, then approval by the shop officer; officer/admin: one-time
+activation code from an admin), then every sign-in is **fingerprint only** - no username,
+no password. Mobile apps use the same endpoints; the server publishes
+`/.well-known/assetlinks.json` and `/.well-known/apple-app-site-association` and accepts the
+Android app's `android:apk-key-hash:` origin. Password login stays disabled (tests only).
+
+| Problem found in the review | Fix |
+|---|---|
+| Pool of 10 raised errors when empty: 38 of 60 parallel requests returned **500** | `db.py` waits for a free connection (`DB_POOL_TIMEOUT`), 503 only on real overload; 200/200 parallel requests succeed |
+| No way to take access away; lost phones kept working | Disable/enable accounts, switch off all of a person's devices, role/shop change, "lost phone" activation code that revokes old devices; `token_version` in every token ends open sessions at once; last active admin protected |
+| Anyone could self-register for any shop and read its data | Self-registered beneficiaries wait for officer approval (no shop data, no complaints until approved); public sign-in endpoints rate limited (`ratelimit.py`) |
+| `login/options` revealed which usernames exist (and their credential IDs) | Usernameless, discoverable passkeys (`residentKey: required`); identical response for everyone |
+| Forecast "next month" was really the month after the last record | Series runs to the current month (zeros filled); running month shown but not trained on; forecast is for the next calendar month (`forecast_month`) |
+| Village requirements could not be removed | `DELETE /villages/{id}/requirements/{commodity_id}`; clearing a box in the dialog removes it |
+| "Today" depended on the DB server's time zone (UTC → wrong day before 05:30 IST) | Every connection uses `APP_TIMEZONE` (default `Asia/Kolkata`); frontend uses local months |
+| Mobile layout: top bar grew to fill the screen on short pages | Grid rows `auto 1fr` |
+| Complaint note said "sent with the SMS" (it is not) | Text corrected (the note is shown in the app) |
+| Page rendered twice after sign-in | Single render; tapping the current menu item refreshes it |
+| Startup check only compared routine names | `setup_db.py` stamps a checksum of `routines.sql`; API refuses outdated routines |
+| Usernames case-sensitive and untrimmed | Trimmed, `[A-Za-z0-9._-]{3,50}` for new names, case-insensitive matching and uniqueness |
+| Docs out of date; Starlette `httpx` deprecation warning | README/report updated; dev dependency `httpx2` |
+
+Not changed (outside authentication, as requested): stock, distribution, biometric adapter,
+SMS templates and providers. Note: distribution SMS still go to every beneficiary of the shop,
+including ones awaiting approval (`ff_notification_recipients`).
 
 ## 1. Files
 
@@ -40,7 +72,7 @@ is used (`ff_audit` is used internally by the other routines).
 | Feature | Before | After |
 |---|---|---|
 | Fresh install | **Broken**: bcrypt 5 + passlib crash; SQLAlchemy 2.1 needs psycopg 3 | Works, pinned and tested |
-| First admin | **Missing**: no way to create one | `setup_db.py` with `ADMIN_USERNAME`/`ADMIN_PASSWORD` |
+| First admin | **Missing**: no way to create one | `setup_db.py` with `ADMIN_USERNAME` (prints a one-time activation code) |
 | DB access | ORM for reads; procedures for writes | Functions for all reads and writes |
 | DB errors (duplicates, bad reason, race) | **500** | 400 / 404 / 409 with messages |
 | Distribution atomicity | Atomic, but unordered locks (deadlock risk) and duplicated Python pre-checks | One function with ordered locks and a single validation path; deadlock retry; tested under concurrency |
@@ -103,4 +135,4 @@ its invalid date. It stopped, the date was fixed, then it migrated and re-ran cl
 
 > We moved all database access into PostgreSQL. FastAPI no longer uses an ORM. Each operation (creating stock, checking readiness, completing a distribution, reading a forecast series) is a named PostgreSQL function, called through one helper with bound parameters. Data rules are enforced by the database itself through constraints, so they apply even outside the API. Distribution is one transaction with ordered row locks: stock is checked and deducted, history is written and the village date is updated together or not at all, and the audit log entry is written in the same transaction. FastAPI does only request validation, JWT authentication, role and shop authorization, and HTTP responses.
 >
-> On biometrics: password login is kept only for the mobile app. Beneficiary identity at the shop counter goes through a separate verification adapter, which stores only the result and never fingerprint data. The real provider requires government authorisation and certified devices, so it is not connected yet. A clearly labelled mock is used for testing.
+> On sign-in: there are no passwords. Each person registers their own device's fingerprint once (passkey); afterwards they sign in with the fingerprint only, on the web or in the mobile app. The fingerprint never leaves the device; the server stores only a public key. On counter verification: beneficiary identity at the shop counter goes through a separate verification adapter, which stores only the result and never fingerprint data. The real provider requires government authorisation and certified devices, so it is not connected yet. A clearly labelled mock is used for testing.

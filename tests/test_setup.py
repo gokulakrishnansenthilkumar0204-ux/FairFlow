@@ -22,7 +22,7 @@ def test_every_called_routine_is_installed_and_every_routine_is_used():
     assert called <= defined == installed_routines()
     routines_sql = (ROOT / "routines.sql").read_text()
     internal = {name for name in defined - called if routines_sql.count(name) > 1}
-    assert defined - called == internal == {"ff_audit"}
+    assert defined - called == internal == {"ff_audit", "ff_assert_admin_remains", "ff_issue_enrollment_code"}
 
 
 def test_no_sqlalchemy_and_sql_only_executed_by_db_call():
@@ -122,7 +122,7 @@ def test_migrates_old_sqlalchemy_schema_in_place():
         assert [r[0] for r in saved] == ["yesterday", "2026-02-30"]  # unreadable originals kept
         assert [r[0] for r in sql("SELECT distribution_date::text FROM legacy_mig.distribution_history ORDER BY id")] \
             == ["2026-05-01", "2026-06-11", "2026-06-12"]
-        assert sql("SELECT count(*) FROM pg_tables WHERE schemaname = 'legacy_mig'")[0][0] == 13
+        assert sql("SELECT count(*) FROM pg_tables WHERE schemaname = 'legacy_mig'")[0][0] == 16
     finally:
         sql("DROP SCHEMA IF EXISTS legacy_mig CASCADE")
 
@@ -160,6 +160,5 @@ def test_seed_demo_is_rerunnable_and_usable(client):
                  "(SELECT count(*) FROM stock), (SELECT count(*) FROM distribution_history)")[0]
     assert counts == (2, 5, 5, 10, 36)
     assert client.post("/signup", json={"username": "fresh", "password": "password123", "shop_id": 1}).status_code == 201
-    token = client.post("/login", data={"username": "officer1", "password": seed_demo.PASSWORD}).json()["access_token"]
-    forecast = client.get("/forecast/1", headers={"Authorization": f"Bearer {token}"}).json()
-    assert forecast["forecast_count"] == 3
+    assert sql("SELECT count(*) FROM users WHERE hashed_password IS NOT NULL AND username LIKE '%demo%'")[0][0] == 0
+    assert sql("SELECT count(*) FROM enrollment_codes WHERE used_at IS NULL")[0][0] == 5  # one per demo user

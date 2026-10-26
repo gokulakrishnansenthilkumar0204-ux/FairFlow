@@ -19,6 +19,12 @@ os.environ.update(
     BIOMETRIC_PROVIDER="mock",
     SMS_PROVIDER="mock",
     APP_ENV="test",
+    ALLOW_PASSWORD_LOGIN="true",  # legacy tests use password sessions; passkey tests use WebAuthn
+    WEBAUTHN_RP_ID="localhost",
+    WEBAUTHN_ORIGIN="http://localhost:8000",
+    RATE_LIMIT_SIGNUP_PER_HOUR="0",
+    RATE_LIMIT_AUTH_PER_MINUTE="0",  # off for the suite; tests/test_access.py turns it on
+    APP_TIMEZONE="Asia/Kolkata",
 )
 
 from fastapi.testclient import TestClient  # noqa: E402
@@ -28,7 +34,8 @@ import setup_db  # noqa: E402
 from auth import hash_password  # noqa: E402
 from db import call  # noqa: E402
 
-TABLES = ("audit_log, notifications, complaints, biometric_verifications, distribution_history, "
+TABLES = ("auth_challenges, enrollment_codes, webauthn_credentials, "
+          "audit_log, notifications, complaints, biometric_verifications, distribution_history, "
           "village_requirements, commodity_status, stock, users, villages, commodities, shops")
 
 
